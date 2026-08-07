@@ -31,6 +31,14 @@ jobs:
       VARIANT: gki
       SKIP_MRPROPER: ${{ inputs.clean == false && '1' || '0' }}
       KERNEL_CMDLINE_CONSOLE_AUTO: "0"
+      EXT_MODULES_MAKEFILE: ${{ github.workspace }}/scripts/creek-external-modules.mk
+      CREEK_DIST_DIR: ${{ github.workspace }}/out/dist
+      # Stock first-stage module lists; all other built modules go to vendor_dlkm.
+      MODULES_LIST: ${{ github.workspace }}/stock-modules/vendor_boot.modules.load
+      MODULES_RECOVERY_LIST: ${{ github.workspace }}/stock-modules/vendor_boot.modules.load.recovery
+      BUILD_VENDOR_BOOT_IMG: "1"
+      BUILD_SYSTEM_DLKM: "1"
+      VENDOR_RAMDISK_BINARY: ${{ github.workspace }}/stock-modules/vendor_boot.ramdisk.lz4
     steps:
       - name: Checkout builder repo
         uses: actions/checkout@v4
@@ -92,6 +100,10 @@ jobs:
         run: |
           set -euo pipefail
           "${GITHUB_WORKSPACE}/scripts/prepare-creek-stock.sh" "$KP"
+          "${GITHUB_WORKSPACE}/scripts/enable-creek-external-build.sh" "$KP"
+          # Preserve the stock vendor_boot command line while build.sh replaces
+          # only its module payload and keeps the stock ramdisk contents.
+          printf 'KERNEL_VENDOR_CMDLINE=%s\n' "$(cat "$GITHUB_WORKSPACE/stock-modules/vendor_boot.cmdline")" >> "$GITHUB_ENV"
           echo "Common build constants:"
           cat "$KP/common/build.config.constants" 2>/dev/null || true
           echo "MSM build constants:"
@@ -99,6 +111,14 @@ jobs:
           echo "Expected clang:"
           ls -d "$KP/prebuilts/clang/host/linux-x86"/clang-r*/bin/clang
           "$KP/prebuilts/clang/host/linux-x86/clang-r450784e/bin/clang" --version | head -n1
+
+      - name: Apply Creek qcacld monitor injection port
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$KP/vendor/qcom/opensource/wlan"
+          patch -p1 --forward --batch < "$GITHUB_WORKSPACE/qcacld-creek-frame-injection.patch"
+          echo "Applied Creek qcacld monitor/injection port"
 
       - name: Build stock Creek kernel/images
         shell: bash
@@ -118,10 +138,28 @@ jobs:
             echo "DIST_DIR=$DIST_DIR"
             echo "SKIP_MRPROPER=$SKIP_MRPROPER"
             echo "JOBS=$JOBS"
+            echo "EXT_MODULES_MAKEFILE=$EXT_MODULES_MAKEFILE"
+            echo "MODULES_LIST=$MODULES_LIST"
+            echo "MODULES_RECOVERY_LIST=$MODULES_RECOVERY_LIST"
+            echo "BUILD_VENDOR_BOOT_IMG=$BUILD_VENDOR_BOOT_IMG"
+            echo "BUILD_SYSTEM_DLKM=$BUILD_SYSTEM_DLKM"
+            echo "VENDOR_RAMDISK_BINARY=$VENDOR_RAMDISK_BINARY"
+            echo "KERNEL_VENDOR_CMDLINE=$KERNEL_VENDOR_CMDLINE"
             echo "Started at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
             build/build.sh -j"$JOBS"
             echo "Finished at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
           } 2>&1 | tee "$GITHUB_WORKSPACE/artifacts/logs/build-creek-stock.log"
+
+      - name: Verify stock module placement
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/artifacts/logs"
+          "$GITHUB_WORKSPACE/scripts/verify-creek-module-placement.sh" \
+            "$KP" "$OUT_DIR" "$DIST_DIR" \
+            "$GITHUB_WORKSPACE/stock-modules" \
+            "$GITHUB_WORKSPACE/artifacts/logs/module-placement.txt"
 
       - name: Collect artifacts
         if: always()
@@ -130,11 +168,19 @@ jobs:
           set -euo pipefail
           mkdir -p "${GITHUB_WORKSPACE}/artifacts/logs"
           # build-creek-stock.log is written directly to artifacts/logs by the build step.
-          cp -f "$KP/common/out/.config" "${GITHUB_WORKSPACE}/artifacts/logs/gki.config" 2>/dev/null || true
-          cp -f "$KP/common/out/include/config/auto.conf" "${GITHUB_WORKSPACE}/artifacts/logs/gki.auto.conf" 2>/dev/null || true
-          cp -f "$KP/common/out/Module.symvers" "${GITHUB_WORKSPACE}/artifacts/logs/gki.Module.symvers" 2>/dev/null || true
-          cp -f "$KP/msm-kernel/out/.config" "${GITHUB_WORKSPACE}/artifacts/logs/msm.config" 2>/dev/null || true
-          cp -f "$KP/msm-kernel/out/Module.symvers" "${GITHUB_WORKSPACE}/artifacts/logs/msm.Module.symvers" 2>/dev/null || true
+          # build.sh uses OUT_DIR/gki_kernel/common and OUT_DIR/msm-kernel;
+          # these are not source-tree */out directories.
+          cp -f "$OUT_DIR/gki_kernel/common/.config" "${GITHUB_WORKSPACE}/artifacts/logs/gki.config" 2>/dev/null || true
+          cp -f "$OUT_DIR/gki_kernel/common/include/config/auto.conf" "${GITHUB_WORKSPACE}/artifacts/logs/gki.auto.conf" 2>/dev/null || true
+          cp -f "$OUT_DIR/gki_kernel/dist/vmlinux.symvers" "${GITHUB_WORKSPACE}/artifacts/logs/gki.vmlinux.symvers" 2>/dev/null || true
+          cp -f "$OUT_DIR/msm-kernel/.config" "${GITHUB_WORKSPACE}/artifacts/logs/msm.config" 2>/dev/null || true
+          cp -f "$OUT_DIR/msm-kernel/Module.symvers" "${GITHUB_WORKSPACE}/artifacts/logs/msm.Module.symvers" 2>/dev/null || true
+          # Record the actual module set produced by the stock staging flow.
+          for root in "$OUT_DIR/staging" "$OUT_DIR/gki_kernel/common" "$OUT_DIR/msm-kernel"; do
+            if [ -d "$root" ]; then
+              find "$root" -type f -name '*.ko' -printf '%f\n' 2>/dev/null
+            fi
+          done | sort -u > "${GITHUB_WORKSPACE}/artifacts/logs/built-module-names.txt"
           if [ -d "$DIST_DIR" ]; then
             # Upload only important flash/test files, not every .ko/debug artifact.
             IMPORTANT_FILES=(
