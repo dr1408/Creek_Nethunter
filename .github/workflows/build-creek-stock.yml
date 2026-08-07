@@ -1,0 +1,223 @@
+name: Build Creek Stock Kernel
+
+permissions:
+  contents: read
+  actions: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      jobs:
+        description: "Parallel jobs: auto uses nproc --all, same style as Spring builder"
+        required: true
+        default: "auto"
+        type: string
+      clean:
+        description: "Clean output before build"
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    env:
+      WORK: ${{ github.workspace }}/work
+      KP: ${{ github.workspace }}/work/kernel_platform
+      OUT_DIR: ${{ github.workspace }}/out
+      DIST_DIR: ${{ github.workspace }}/out/dist
+      BUILD_CONFIG: msm-kernel/build.config.msm.creek
+      VARIANT: gki
+      SKIP_MRPROPER: ${{ inputs.clean == false && '1' || '0' }}
+      KERNEL_CMDLINE_CONSOLE_AUTO: "0"
+      EXT_MODULES_MAKEFILE: ${{ github.workspace }}/scripts/creek-external-modules.mk
+      CREEK_DIST_DIR: ${{ github.workspace }}/out/dist
+      # Stock first-stage module lists; all other built modules go to vendor_dlkm.
+      MODULES_LIST: ${{ github.workspace }}/stock-modules/vendor_boot.modules.load
+      MODULES_RECOVERY_LIST: ${{ github.workspace }}/stock-modules/vendor_boot.modules.load.recovery
+      BUILD_VENDOR_BOOT_IMG: "1"
+      VENDOR_RAMDISK_BINARY: ${{ github.workspace }}/stock-modules/vendor_boot.ramdisk.lz4
+    steps:
+      - name: Checkout builder repo
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache || true
+          df -h
+
+      - name: Install packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            git-core gnupg flex bison build-essential zip curl zlib1g-dev libc6-dev \
+            libncurses-dev libssl-dev libelf-dev python3 python-is-python3 bc rsync \
+            unzip cpio lz4 xz-utils file dwarves pahole jq ca-certificates
+
+      - name: Setup SWAP like Spring builder
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 16
+
+      - name: Install repo tool
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/bin"
+          curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o "$HOME/bin/repo"
+          chmod +x "$HOME/bin/repo"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Repo sync Creek sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$WORK"
+          cd "$WORK"
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          git config --global color.ui false
+          repo init \
+            -u "https://github.com/${GITHUB_REPOSITORY}.git" \
+            -b "${GITHUB_REF_NAME}" \
+            -m kernel_manifest/creek.xml \
+            --repo-rev=stable \
+            --depth=1 \
+            --no-clone-bundle \
+            --no-tags
+          repo sync -c --no-clone-bundle --no-tags --optimized-fetch --fail-fast -j2
+          echo "Synced projects:"
+          repo list | sort
+
+      - name: Prepare Creek stock layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${GITHUB_WORKSPACE}/scripts/prepare-creek-stock.sh" "$KP"
+          "${GITHUB_WORKSPACE}/scripts/enable-creek-external-build.sh" "$KP"
+          # Preserve the stock vendor_boot command line while build.sh replaces
+          # only its module payload and keeps the stock ramdisk contents.
+          printf 'KERNEL_VENDOR_CMDLINE=%s\n' "$(cat "$GITHUB_WORKSPACE/stock-modules/vendor_boot.cmdline")" >> "$GITHUB_ENV"
+          echo "Common build constants:"
+          cat "$KP/common/build.config.constants" 2>/dev/null || true
+          echo "MSM build constants:"
+          cat "$KP/msm-kernel/build.config.constants" 2>/dev/null || true
+          echo "Expected clang:"
+          ls -d "$KP/prebuilts/clang/host/linux-x86"/clang-r*/bin/clang
+          "$KP/prebuilts/clang/host/linux-x86/clang-r450784e/bin/clang" --version | head -n1
+
+      - name: Build stock Creek kernel/images
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUT_DIR" "$DIST_DIR" "$GITHUB_WORKSPACE/artifacts/logs"
+          cd "$KP"
+          if [ "${{ inputs.jobs }}" = "auto" ]; then
+            JOBS="$(nproc --all)"
+          else
+            JOBS="${{ inputs.jobs }}"
+          fi
+          {
+            echo "BUILD_CONFIG=$BUILD_CONFIG"
+            echo "VARIANT=$VARIANT"
+            echo "OUT_DIR=$OUT_DIR"
+            echo "DIST_DIR=$DIST_DIR"
+            echo "SKIP_MRPROPER=$SKIP_MRPROPER"
+            echo "JOBS=$JOBS"
+            echo "EXT_MODULES_MAKEFILE=$EXT_MODULES_MAKEFILE"
+            echo "MODULES_LIST=$MODULES_LIST"
+            echo "MODULES_RECOVERY_LIST=$MODULES_RECOVERY_LIST"
+            echo "BUILD_VENDOR_BOOT_IMG=$BUILD_VENDOR_BOOT_IMG"
+            echo "VENDOR_RAMDISK_BINARY=$VENDOR_RAMDISK_BINARY"
+            echo "KERNEL_VENDOR_CMDLINE=$KERNEL_VENDOR_CMDLINE"
+            echo "Started at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            build/build.sh -j"$JOBS"
+            echo "Finished at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          } 2>&1 | tee "$GITHUB_WORKSPACE/artifacts/logs/build-creek-stock.log"
+
+      - name: Verify stock module placement
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/artifacts/logs"
+          "$GITHUB_WORKSPACE/scripts/verify-creek-module-placement.sh" \
+            "$KP" "$OUT_DIR" "$DIST_DIR" \
+            "$GITHUB_WORKSPACE/stock-modules" \
+            "$GITHUB_WORKSPACE/artifacts/logs/module-placement.txt"
+
+      - name: Collect artifacts
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/artifacts/logs"
+          # build-creek-stock.log is written directly to artifacts/logs by the build step.
+          # build.sh uses OUT_DIR/gki_kernel/common and OUT_DIR/msm-kernel;
+          # these are not source-tree */out directories.
+          cp -f "$OUT_DIR/gki_kernel/common/.config" "${GITHUB_WORKSPACE}/artifacts/logs/gki.config" 2>/dev/null || true
+          cp -f "$OUT_DIR/gki_kernel/common/include/config/auto.conf" "${GITHUB_WORKSPACE}/artifacts/logs/gki.auto.conf" 2>/dev/null || true
+          cp -f "$OUT_DIR/gki_kernel/dist/vmlinux.symvers" "${GITHUB_WORKSPACE}/artifacts/logs/gki.vmlinux.symvers" 2>/dev/null || true
+          cp -f "$OUT_DIR/msm-kernel/.config" "${GITHUB_WORKSPACE}/artifacts/logs/msm.config" 2>/dev/null || true
+          cp -f "$OUT_DIR/msm-kernel/Module.symvers" "${GITHUB_WORKSPACE}/artifacts/logs/msm.Module.symvers" 2>/dev/null || true
+          # Record the actual module set produced by the stock staging flow.
+          for root in "$OUT_DIR/staging" "$OUT_DIR/gki_kernel/common" "$OUT_DIR/msm-kernel"; do
+            if [ -d "$root" ]; then
+              find "$root" -type f -name '*.ko' -printf '%f\n' 2>/dev/null
+            fi
+          done | sort -u > "${GITHUB_WORKSPACE}/artifacts/logs/built-module-names.txt"
+          # Upload rebuilt WLAN modules separately for quick on-device testing.
+          mkdir -p "${GITHUB_WORKSPACE}/artifacts/wlan-modules"
+          if [ -d "$OUT_DIR/staging" ]; then
+            find "$OUT_DIR/staging" -type f \
+              \( -path '*/extra/vendor/qcom/opensource/wlan/platform/*.ko' \
+                 -o -path '*/extra/vendor/qcom/opensource/wlan/platform/*/*.ko' \
+                 -o -path '*/extra/vendor/qcom/opensource/wlan/qcacld-3.0/*.ko' \
+                 -o -path '*/extra/vendor/qcom/opensource/wlan/qcacld-3.0/*/*.ko' \) \
+              -exec cp -f {} "${GITHUB_WORKSPACE}/artifacts/wlan-modules/" \; 2>/dev/null || true
+          fi
+          if [ -d "$DIST_DIR" ]; then
+            # Upload only important flash/test files, not every .ko/debug artifact.
+            IMPORTANT_FILES=(
+              Image
+              Image.gz
+              Image.lz4
+              boot.img
+              boot-gz.img
+              boot-lz4.img
+              init_boot.img
+              vendor_boot.img
+              dtb.img
+              dtbo.img
+              system_dlkm.img
+              system_dlkm.modules.load
+              system_dlkm.modules.blocklist
+              vendor_dlkm.img
+              vendor_dlkm.modules.load
+              vendor_dlkm.modules.blocklist
+              modules.load
+              gki-info.txt
+            )
+            for f in "${IMPORTANT_FILES[@]}"; do
+              [ -f "$DIST_DIR/$f" ] && cp -f "$DIST_DIR/$f" "${GITHUB_WORKSPACE}/artifacts/"
+            done
+            # Keep module load lists and image manifests if Xiaomi names differ.
+            find "$DIST_DIR" -maxdepth 1 -type f \
+              \( -name '*modules.load' -o -name '*modules.blocklist' -o -name '*dtb*.img' -o -name '*dtbo*.img' \) \
+              -exec cp -f {} "${GITHUB_WORKSPACE}/artifacts/" \;
+          fi
+          echo "Artifacts:"
+          find "${GITHUB_WORKSPACE}/artifacts" -maxdepth 2 -type f -printf '%P %s bytes\n' | sort || true
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: creek-stock-build
+          path: artifacts/
+          if-no-files-found: warn
