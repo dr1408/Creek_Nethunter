@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+  <remote name="micode" fetch="https://github.com/MiCode" />
+  <remote name="aosp" fetch="https://android.googlesource.com/" />
+
+  <default remote="micode" revision="creek-v-oss" sync-c="true" sync-tags="false" />
+
+  <!-- Real GKI common matching stock Creek kernel string:
+       5.15.167-android13-8-00014-gbf0a81a7f319-ab13297889 -->
+  <project remote="aosp"
+           name="kernel/common"
+           path="kernel_platform/common"
+           revision="refs/changes/72/3568672/2">
+    <linkfile src="." dest="kernel_platform/.source_date_epoch_dir" />
+  </project>
+
+  <!-- Xiaomi released device/vendor kernel. This is msm-kernel, not common. -->
+  <project remote="micode"
+           name="Xiaomi_Kernel_OpenSource"
+           path="kernel_platform/msm-kernel"
+           revision="creek-v-oss" />
+
+  <!-- Xiaomi kernel build scripts. Creek build.config expects build/kernel/... -->
+  <project remote="micode" name="kernel_build" path="kernel_platform/build/kernel" revision="creek-v-oss">
+    <linkfile src="build.sh" dest="kernel_platform/build/build.sh" />
+    <linkfile src="build_abi.sh" dest="kernel_platform/build/build_abi.sh" />
+    <linkfile src="build_utils.sh" dest="kernel_platform/build/build_utils.sh" />
+    <linkfile src="config.sh" dest="kernel_platform/build/config.sh" />
+    <linkfile src="envsetup.sh" dest="kernel_platform/build/envsetup.sh" />
+    <linkfile src="_setup_env.sh" dest="kernel_platform/build/_setup_env.sh" />
+    <linkfile src="abi" dest="kernel_platform/build/abi" />
+    <linkfile src="static_analysis" dest="kernel_platform/build/static_analysis" />
+  </project>
+
+  <!-- AOSP config repo used by common GKI builds. -->
+  <project remote="aosp" name="kernel/configs" path="kernel_platform/kernel/configs" revision="refs/heads/master-kernel-build-2022" />
+
+  <!-- Device tree sources for Xiaomi msm-kernel dtbs/dtbo. -->
+  <project remote="micode" name="kernel_devicetree" path="kernel_platform/kernel-devicetree" revision="creek-v-oss" />
+  <project remote="micode" name="vendor_qcom_proprietary_camera-devicetree" path="kernel_platform/vendor/qcom/proprietary/camera-devicetree" revision="creek-v-oss" />
+  <project remote="micode" name="vendor_qcom_proprietary_display-devicetree" path="kernel_platform/vendor/qcom/proprietary/display-devicetree" revision="creek-v-oss" />
+
+  <!-- Stock QCOM / Xiaomi vendor module sources. -->
+  <project remote="micode" name="vendor_qcom_opensource_wlan" path="kernel_platform/vendor/qcom/opensource/wlan" revision="creek-v-oss" />
+  <project remote="micode" name="vendor_qcom_opensource_audio-kernel" path="kernel_platform/vendor/qcom/opensource/audio-kernel" revision="creek-v-oss" />
+  <project remote="micode" name="vendor_qcom_opensource_camera-kernel" path="kernel_platform/vendor/qcom/opensource/camera-kernel" revision="creek-v-oss" />
+  <project remote="micode" name="vendor_qcom_opensource_data-kernel" path="kernel_platform/vendor/qcom/opensource/data-kernel" revision="creek-v-oss" />
+  <project remote="micode" name="vendor_opensource_display-drivers" path="kernel_platform/vendor/qcom/opensource/display-drivers" revision="creek-v-oss" />
+
+  <!-- Exact Creek toolchain: CLANG_VERSION=r450784e. -->
+  <project remote="aosp" name="platform/prebuilts/clang/host/linux-x86" path="kernel_platform/prebuilts/clang/host/linux-x86" clone-depth="1" revision="refs/heads/master-kernel-build-2022" />
+
+  <!-- Creek build configs use NDK_TRIPLE=aarch64-linux-android31. -->
+  <project remote="aosp" name="toolchain/prebuilts/ndk/r23" path="kernel_platform/prebuilts/ndk-r23" clone-depth="1" revision="refs/heads/master-kernel-build-2022" />
+
+  <!-- MiCode build/kernel/build-tools/path entries are symlinks into this AOSP prebuilt tree. -->
+  <project remote="aosp" name="platform/prebuilts/build-tools" path="kernel_platform/prebuilts/build-tools" clone-depth="1" revision="refs/heads/master-kernel-build-2022" />
+
+  <!-- MiCode build/kernel/build-tools/sysroot is a symlink into this glibc sysroot. -->
+  <project remote="aosp" name="platform/prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.17-4.8" path="kernel_platform/prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.17-4.8" clone-depth="1" revision="refs/heads/master-kernel-build-2022" />
+
+  <!-- MiCode build/kernel/build-tools/path/linux-x86/cxx_extractor points here. -->
+  <project remote="aosp" name="platform/prebuilts/clang-tools" path="kernel_platform/prebuilts/clang-tools" clone-depth="1" revision="refs/heads/android13-release" />
+
+  <!-- Hermetic build.sh uses prebuilts/kernel-build-tools/linux-x86 include/lib64. -->
+  <project remote="aosp" name="kernel/prebuilts/build-tools" path="kernel_platform/prebuilts/kernel-build-tools" clone-depth="1" revision="refs/heads/master-kernel-build-2022" />
+
+  <!-- AOSP mkbootimg.py is the default MKBOOTIMG_PATH used by MiCode build_utils.sh. -->
+  <project remote="aosp" name="platform/system/tools/mkbootimg" path="kernel_platform/tools/mkbootimg" revision="refs/heads/master-kernel-build-2022" />
+
+  <!-- Creek build.config.msm.common compiles ROOT_DIR/external/dtc during PRE_DEFCONFIG_CMDS. -->
+  <project remote="aosp" name="platform/external/dtc" path="kernel_platform/external/dtc" revision="refs/heads/android14-release" />
+</manifest>

@@ -1,0 +1,13 @@
+{
+  "model": "CREEK",
+  "soc": "creek",
+  "branch": "creek-v-oss",
+  "boot_partition_size": "100663296",
+  "vendor_boot_partition_size": "100663296",
+  "qcacld_dev_name": "",
+  "clang": "manifest",
+  "manifest_custom": "https://raw.githubusercontent.com/dr1408/Creek_Nethunter/main/kernel_manifest/creek.xml",
+  "android_version": "android13",
+  "kernel_version": "5.15",
+  "hmbird": false
+}
