@@ -50,7 +50,7 @@ wlan-platform:
 	$(call build_module,wlan platform,$(WLAN_PLATFORM),../vendor/qcom/opensource/wlan/platform,USE_EXTERNAL_CONFIGS=1 CONFIG_CNSS_OUT_OF_TREE=y CONFIG_ICNSS2=m CONFIG_ICNSS2_QMI=y CONFIG_CNSS_QMI_SVC=m CONFIG_CNSS_GENL=m CONFIG_WCNSS_MEM_PRE_ALLOC=m CONFIG_CNSS_UTILS=m,vendor/qcom/opensource/wlan/platform)
 
 wlan-qcacld:
-	$(call build_module,qcacld-3.0,$(WLAN_QCACLD),../vendor/qcom/opensource/wlan/qcacld-3.0,WLAN_CHIPSET=qca_cld3 CONFIG_FEATURE_FRAME_INJECTION_SUPPORT=y KBUILD_EXTRA_SYMBOLS='$(WLAN_PLATFORM_SYMVERS)',vendor/qcom/opensource/wlan/qcacld-3.0)
+	$(call build_module,qcacld-3.0,$(WLAN_QCACLD),../vendor/qcom/opensource/wlan/qcacld-3.0,WLAN_CHIPSET=qca_cld3 WLAN_PROFILE=blair_gki_wlan KBUILD_EXTRA_SYMBOLS='$(WLAN_PLATFORM_SYMVERS)',vendor/qcom/opensource/wlan/qcacld-3.0)
 
 display:
 	$(call build_module,display,$(DISPLAY),../vendor/qcom/opensource/display-drivers,MODNAME=msm_drm BOARD_PLATFORM=bengal,vendor/qcom/opensource/display-drivers)

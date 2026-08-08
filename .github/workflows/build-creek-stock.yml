@@ -112,14 +112,6 @@ jobs:
           ls -d "$KP/prebuilts/clang/host/linux-x86"/clang-r*/bin/clang
           "$KP/prebuilts/clang/host/linux-x86/clang-r450784e/bin/clang" --version | head -n1
 
-      - name: Apply Creek qcacld monitor injection port
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$KP/vendor/qcom/opensource/wlan"
-          patch -p1 --forward --batch < "$GITHUB_WORKSPACE/qcacld-creek-frame-injection.patch"
-          echo "Applied Creek qcacld monitor/injection port"
-
       - name: Build stock Creek kernel/images
         shell: bash
         run: |
