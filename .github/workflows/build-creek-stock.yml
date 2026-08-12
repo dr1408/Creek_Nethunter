@@ -29,10 +29,12 @@ jobs:
       DIST_DIR: ${{ github.workspace }}/out/dist
       BUILD_CONFIG: msm-kernel/build.config.msm.creek
       VARIANT: gki
+      LTO: thin
       SKIP_MRPROPER: ${{ inputs.clean == false && '1' || '0' }}
       KERNEL_CMDLINE_CONSOLE_AUTO: "0"
       EXT_MODULES_MAKEFILE: ${{ github.workspace }}/scripts/creek-external-modules.mk
       CREEK_DIST_DIR: ${{ github.workspace }}/out/dist
+      CREEK_INJECTION_DEBUG: "1"
       # Stock first-stage module lists; all other built modules go to vendor_dlkm.
       MODULES_LIST: ${{ github.workspace }}/stock-modules/vendor_boot.modules.load
       MODULES_RECOVERY_LIST: ${{ github.workspace }}/stock-modules/vendor_boot.modules.load.recovery
@@ -57,7 +59,10 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             git-core gnupg flex bison build-essential zip curl zlib1g-dev libc6-dev \
             libncurses-dev libssl-dev libelf-dev python3 python-is-python3 bc rsync \
-            unzip cpio lz4 xz-utils file dwarves pahole jq ca-certificates
+            unzip cpio lz4 xz-utils file dwarves pahole jq ca-certificates \
+            binutils lld clang
+          # BBG's host flask-header generator invokes the unversioned linker.
+          sudo ln -sf "$(command -v ld.lld || command -v ld.bfd)" /usr/local/bin/ld
 
       - name: Setup SWAP like Spring builder
         uses: pierotofy/set-swap-space@master
@@ -99,6 +104,7 @@ jobs:
         run: |
           set -euo pipefail
           "${GITHUB_WORKSPACE}/scripts/prepare-creek-stock.sh" "$KP"
+          "${GITHUB_WORKSPACE}/scripts/enable-creek-nethunter.sh" "$KP"
           "${GITHUB_WORKSPACE}/scripts/enable-creek-external-build.sh" "$KP"
           # Preserve the stock vendor_boot command line while build.sh replaces
           # only its module payload and keeps the stock ramdisk contents.
@@ -122,6 +128,7 @@ jobs:
           else
             JOBS="${{ inputs.jobs }}"
           fi
+          export KERNEL_BUILD_JOBS="$JOBS"
           {
             echo "BUILD_CONFIG=$BUILD_CONFIG"
             echo "VARIANT=$VARIANT"
@@ -178,9 +185,33 @@ jobs:
               \( -path '*/extra/vendor/qcom/opensource/wlan/platform/*.ko' \
                  -o -path '*/extra/vendor/qcom/opensource/wlan/platform/*/*.ko' \
                  -o -path '*/extra/vendor/qcom/opensource/wlan/qcacld-3.0/*.ko' \
-                 -o -path '*/extra/vendor/qcom/opensource/wlan/qcacld-3.0/*/*.ko' \) \
+                 -o -path '*/extra/vendor/qcom/opensource/wlan/qcacld-3.0/*/*.ko' \
+                 -o -path '*/extra/nethunter/rtw88/*.ko' \
+                 -o -path '*/extra/nethunter/rtl8xxxu/*.ko' \
+                 -o -path '*/kernel/drivers/net/wireless/realtek/*.ko' \
+                 -o -path '*/kernel/drivers/net/wireless/realtek/*/*.ko' \
+                 -o -path '*/kernel/drivers/net/wireless/mediatek/*.ko' \
+                 -o -path '*/kernel/drivers/net/wireless/mediatek/*/*.ko' \
+                 -o -path '*/kernel/drivers/net/wireless/mediatek/*/*/*.ko' \
+                 -o -name 'mt76*.ko' \
+                 -o -name 'mt7601u.ko' \
+                 -o -name 'mt76x*.ko' \
+                 -o -name 'mt7615*.ko' \
+                 -o -name 'mt7663*.ko' \
+                 -o -name 'mt7921*.ko' \) \
               -exec cp -f {} "${GITHUB_WORKSPACE}/artifacts/wlan-modules/" \; 2>/dev/null || true
           fi
+          # Upload NetHunter GKI modules separately for quick testing. These
+          # are also included in vendor_dlkm.img, but this directory preserves
+          # the individual .ko files for adb testing.
+          mkdir -p "${GITHUB_WORKSPACE}/artifacts/nethunter-modules"
+          # TCP congestion modules are built by the common GKI tree and may not
+          # be present under OUT_DIR/staging. Search every build output root so
+          # tcp_bic.ko, tcp_westwood.ko, and tcp_htcp.ko are uploaded reliably.
+          for root in "$OUT_DIR/staging" "$OUT_DIR/gki_kernel/common" "$OUT_DIR/msm-kernel"; do
+            [ -d "$root" ] || continue
+            find "$root" -type f \( -path "*/kernel/drivers/net/wireless/mediatek/*.ko" -o -path "*/kernel/drivers/net/wireless/mediatek/*/*.ko" -o -path "*/kernel/drivers/net/wireless/mediatek/*/*/*.ko" -o -path "*/kernel/net/ipv4/*.ko" -o -path "*/net/ipv4/tcp_bic.ko" -o -path "*/net/ipv4/tcp_westwood.ko" -o -path "*/net/ipv4/tcp_htcp.ko" -o -name "mt76*.ko" -o -name "mt7601u.ko" -o -name "mt76x*.ko" -o -name "mt7615*.ko" -o -name "mt7663*.ko" -o -name "mt7921*.ko" -o -path "*/kernel/drivers/net/wireless/realtek/*.ko" -o -path "*/kernel/drivers/net/wireless/realtek/*/*.ko" -o -path "*/extra/nethunter/rtl8xxxu/*.ko" -o -name "cfg80211.ko" -o -name "mac80211.ko" -o -name "tcp_bic.ko" -o -name "tcp_westwood.ko" -o -name "tcp_htcp.ko" \) -exec cp -f {} "${GITHUB_WORKSPACE}/artifacts/nethunter-modules/" \; 2>/dev/null || true
+          done
           if [ -d "$DIST_DIR" ]; then
             # Upload only important flash/test files, not every .ko/debug artifact.
             IMPORTANT_FILES=(

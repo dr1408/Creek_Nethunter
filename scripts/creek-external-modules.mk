@@ -18,12 +18,15 @@ WLAN_QCACLD := $(KP)/vendor/qcom/opensource/wlan/qcacld-3.0
 DISPLAY := $(KP)/vendor/qcom/opensource/display-drivers
 CAMERA := $(KP)/vendor/qcom/opensource/camera-kernel
 AUDIO := $(KP)/vendor/qcom/opensource/audio-kernel
+NETHUNTER_DIR := $(KP)/nethunter-external
+RTW88 := $(NETHUNTER_DIR)/rtw88
+RTL8XXXU := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../rtl)
 
 WLAN_PLATFORM_SYMVERS := $(WLAN_PLATFORM)/Module.symvers
 DISPLAY_SYMVERS := $(O)/../vendor/qcom/opensource/display-drivers/Module.symvers
-# KBUILD_MIXED_TREE already supplies GKI vmlinux.symvers, while the vendor
-# kernel build supplies its own Module.symvers. Passing either base file again
-# through KBUILD_EXTRA_SYMBOLS causes duplicate exports during modpost.
+# KBUILD_MIXED_TREE supplies the common GKI vmlinux symbols to this
+# vendor build. Do not pass vmlinux.symvers again: older Creek Kbuild then
+# sees every built-in export twice during modpost.
 COMMON_ARGS := ARCH=arm64 LLVM=1 KERNEL_SRC=$(VENDOR_KERNEL_SRC) O=$(O) KBUILD_MIXED_TREE=$(KBUILD_MIXED_TREE)
 
 # MiCode's blair GKI build passes this complete platform configuration to
@@ -40,11 +43,11 @@ WLAN_QCACLD_KCONFIG := CONFIG_IPA_WDI_UNIFIED_API=y CONFIG_REMOVE_PKT_LOG=n CONF
 WLAN_QCACLD_KCFLAGS := KCFLAGS=-Wno-macro-redefined\ -DCFG80211_SINGLE_NETDEV_MULTI_LINK_SUPPORT=1\ -DCONFIG_IPA_WDI_UNIFIED_API=1\ -include\ $(WLAN_QCACLD)/configs/default_config.h\ -include\ $(WLAN_QCACLD)/configs/creek_blair_gki_autoconf.h\ -include\ $(WLAN_QCACLD)/configs/config_to_feature.h
 
 
-.PHONY: all wlan-platform wlan-qcacld display camera audio external-dt
+.PHONY: all wlan-platform wlan-qcacld display camera audio rtw88 rtl8xxxu external-dt
 # Every external module re-enters the same msm-kernel O= directory. Parallel
 # recursive Kbuild invocations race while generating shared kernel files.
-.NOTPARALLEL: all wlan-platform wlan-qcacld display camera audio external-dt
-all: wlan-platform wlan-qcacld display camera audio external-dt
+.NOTPARALLEL: all wlan-platform wlan-qcacld display camera audio rtw88 rtl8xxxu external-dt
+all: wlan-platform wlan-qcacld display camera audio rtw88 rtl8xxxu external-dt
 
 wlan-qcacld: wlan-platform
 
@@ -85,6 +88,35 @@ camera:
 audio:
 	$(call build_module,audio,$(AUDIO),../vendor/qcom/opensource/audio-kernel,MODNAME=audio_dlkm BOARD_PLATFORM=bengal TARGET_SUPPORT=bengal AUDIO_ROOT=$(AUDIO) CONFIG_SND_SOC_BENGAL=m,vendor/qcom/opensource/audio-kernel)
 
+rtw88:
+	@if [ ! -d "$(RTW88)" ]; then \
+		echo "[creek] cloning rtw88"; \
+		mkdir -p "$(NETHUNTER_DIR)"; \
+		git clone --depth=1 https://github.com/lwfinger/rtw88.git "$(RTW88)"; \
+	fi
+	@echo "[creek] building NetHunter rtw88"
+	cd $(RTW88) && $(MAKE) KSRC=$(VENDOR_KERNEL_SRC) KERNEL_SRC=$(VENDOR_KERNEL_SRC) ARCH=arm64 LLVM=1 O=$(O) KBUILD_MIXED_TREE=$(KBUILD_MIXED_TREE) all
+	@set -e; \
+		for kdir in "$(INSTALL_MOD_PATH)"/lib/modules/*; do \
+			[ -d "$$kdir" ] || continue; \
+			dest="$$kdir/extra/nethunter/rtw88"; \
+			mkdir -p "$$dest"; \
+			cp -f $(RTW88)/*.ko "$$dest/"; \
+			find "$$dest" -maxdepth 1 -type f -name '*.ko' -printf 'extra/nethunter/rtw88/%f\n' >> "$$kdir/modules.order"; \
+			awk '!seen[$$0]++' "$$kdir/modules.order" > "$$kdir/modules.order.tmp" && mv "$$kdir/modules.order.tmp" "$$kdir/modules.order"; \
+			depmod -b "$(INSTALL_MOD_PATH)" "$$(basename "$$kdir")"; \
+		done
+
+rtl8xxxu:
+	@test -f "$(RTL8XXXU)/rtl8188eufw_fw.h" || { echo "[creek] missing embedded RTL8188EUS firmware header" >&2; exit 1; }
+	@echo "[creek] building GKI rtl8xxxu (embedded RTL8188EUS firmware)"
+	$(MAKE) -C $(VENDOR_KERNEL_SRC) M=$(RTL8XXXU) $(COMMON_ARGS) modules
+	$(MAKE) -C $(VENDOR_KERNEL_SRC) M=$(RTL8XXXU) $(COMMON_ARGS) INSTALL_MOD_PATH=$(INSTALL_MOD_PATH) INSTALL_MOD_DIR=extra/nethunter/rtl8xxxu modules_install
+	@set -e; \
+	for kdir in "$(INSTALL_MOD_PATH)"/lib/modules/*; do \
+		[ -d "$$kdir" ] || continue; \
+		depmod -b "$(INSTALL_MOD_PATH)" "$$(basename "$$kdir")"; \
+	done
 
 # Auxiliary camera/display DT repositories are built when their Makefile
 # supports the standard external dtbs target. The kernel DT tree remains the

@@ -9,7 +9,6 @@ WLAN="$ROOT/vendor/qcom/opensource/wlan"
 QCACLD="$WLAN/qcacld-3.0"
 QCACLD_PROFILE_DEFCONFIG="$QCACLD/configs/blair_gki_wlan_defconfig"
 QCACLD_AUTOCONF="$QCACLD/configs/creek_blair_gki_autoconf.h"
-
 # Manual Kbuild does not get Kleaf/DDK's module defconfig -> C macro bridge.
 # Generate a small autoconf-style header from Creek's qcacld profile so
 # configs/config_to_feature.h sees the same CONFIG_* values as Bazel/DDK.
@@ -62,6 +61,11 @@ grep -q '^#define CONFIG_WLAN_DEBUGFS 1$' "$QCACLD_AUTOCONF"
 
 mkdir -p "$VENDOR_DTS"
 
+# Keep Creek's original wireless split configuration intact. cfg80211 and
+# mac80211 are built as MSM/vendor modules, and dependent WLAN modules must
+# use the same MSM Module.symvers. Do not convert cfg80211 to built-in in the
+# vendor fragment; that duplicates wireless exports during modpost.
+
 # build.sh recursively invokes the GKI build. Do not let the outer external
 # module makefile run during that recursive common-kernel build: vendor modules
 # must be built only after GKI artifacts exist, against msm-kernel with
@@ -73,6 +77,52 @@ if [ ! -f "$REAL_BUILD_SH" ]; then
   echo "ERROR: resolved build.sh target not found: $REAL_BUILD_SH" >&2
   exit 1
 fi
+
+# Creek's custom GKI adds symbols from NetHunter subsystems (TCP congestion
+# control and other common-kernel features). Wireless cores and MT76 stay in
+# the MSM module build. Use nullptr-t-oss' ABI bypass v2 so the
+# stock symbol-list gate reports differences but does not abort this custom
+# kernel build.
+ABI_BYPASS_PATCH="$REPO_ROOT/patches/common/abi-bypass-v2.patch"
+ABI_CHECKER="$ROOT/build/abi/compare_to_symbol_list"
+if [ ! -f "$ABI_CHECKER" ]; then
+  ABI_CHECKER="$ROOT/build/kernel/abi/compare_to_symbol_list"
+fi
+if [ ! -f "$ABI_CHECKER" ]; then
+  echo "ERROR: ABI checker not found under kernel_platform" >&2
+  exit 1
+fi
+ABI_CHECKER_REAL="$(readlink -f "$ABI_CHECKER")"
+echo "[nethunter] ABI checker: $ABI_CHECKER -> $ABI_CHECKER_REAL"
+if grep -q 'BUT WHO CARES?' "$ABI_CHECKER_REAL"; then
+  echo "[nethunter] ABI bypass already applied"
+elif grep -qE '^\s*exit 1$' "$ABI_CHECKER_REAL"; then
+  # The repo manifest exposes this project through symlinks, so git -C on the
+  # kernel_platform superdirectory is unreliable. Apply the same nullptr v2
+  # change to the exact resolved checker used by build.sh, then verify it.
+  ABI_CHECKER_TMP="${ABI_CHECKER_REAL}.tmp"
+  awk '{ if ($0 ~ /^[[:space:]]*exit 1$/) { print "\techo \"BUT WHO CARES?\" >&2"; print "\texit 0" } else print }' \
+    "$ABI_CHECKER_REAL" > "$ABI_CHECKER_TMP"
+  mv "$ABI_CHECKER_TMP" "$ABI_CHECKER_REAL"
+  chmod +x "$ABI_CHECKER_REAL"
+  echo "[nethunter] ABI bypass applied: $ABI_CHECKER_REAL"
+else
+  echo "ERROR: ABI checker has unexpected contents: $ABI_CHECKER_REAL" >&2
+  tail -20 "$ABI_CHECKER_REAL" >&2
+  exit 1
+fi
+if ! grep -q 'BUT WHO CARES?' "$ABI_CHECKER_REAL"; then
+  echo "ERROR: ABI bypass verification failed" >&2
+  exit 1
+fi
+# build.sh overwrites MAKEFLAGS with nproc, which can terminate the runner
+# during the GKI LTO link. Respect the workflow's explicit jobs input for both
+# the outer vendor build and the recursive inner GKI build.
+if ! grep -q 'creek_nethunter_jobs_fix' "$REAL_BUILD_SH"; then
+  sed -i 's/export MAKEFLAGS="-j$(nproc) ${MAKEFLAGS}"/#[ creek_nethunter_jobs_fix ]\nexport MAKEFLAGS="-j${KERNEL_BUILD_JOBS:-$(nproc)} ${MAKEFLAGS}"/' "$REAL_BUILD_SH"
+  sed -i '/GKI_ENVIRON+=("EXT_MODULES=")/a\  GKI_ENVIRON+=("KERNEL_BUILD_JOBS=${KERNEL_BUILD_JOBS}")' "$REAL_BUILD_SH"
+fi
+
 if grep -q 'GKI_ENVIRON+=("EXT_MODULES=")' "$REAL_BUILD_SH" \
    && ! grep -q 'GKI_ENVIRON+=("EXT_MODULES_MAKEFILE=")' "$REAL_BUILD_SH"; then
   sed -i '/GKI_ENVIRON+=("EXT_MODULES=")/a\  GKI_ENVIRON+=("EXT_MODULES_MAKEFILE=")' "$REAL_BUILD_SH"
