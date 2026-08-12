@@ -18,3 +18,46 @@ The stock module lists are under `stock-modules/`. Modules selected by the
 vendor_boot lists are staged for first-stage loading; remaining built modules
 are placed in vendor_dlkm by the Xiaomi build system. A stock vendor_boot
 image itself is not committed to this repository.
+
+## Modules not available from the current sources
+
+The following stock Xiaomi modules are currently missing from the build because
+their matching vendor source is not available in this tree.
+
+Normal `vendor_boot`:
+
+```text
+bootinfo.ko
+mi_memory.ko
+mi_thermal_interface.ko
+qrng_dlkm.ko
+qseecom_dlkm.ko
+swinfo.ko
+```
+
+Recovery `vendor_boot`:
+
+```text
+bootinfo.ko
+hdcp_qseecom_dlkm.ko
+lct_tp.ko
+mi_memory.ko
+mi_thermal_interface.ko
+msm-mmrm.ko
+msm_drm.ko
+qseecom_dlkm.ko
+smcinvoke_dlkm.ko
+swinfo.ko
+```
+
+Additional `vendor_dlkm` modules not currently built:
+
+```text
+ipam.ko
+ipanetm.ko
+ipa_clientsm.ko
+rndisipam.ko
+rmnet_core.ko
+rmnet_ctl.ko
+rmnet_wlan.ko
+```

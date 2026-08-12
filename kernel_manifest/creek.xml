@@ -2,6 +2,7 @@
 <manifest>
   <remote name="micode" fetch="https://github.com/MiCode" />
   <remote name="aosp" fetch="https://android.googlesource.com/" />
+  <remote name="dr1408" fetch="https://github.com/dr1408" />
 
   <default remote="micode" revision="creek-v-oss" sync-c="true" sync-tags="false" />
 
@@ -41,7 +42,7 @@
   <project remote="micode" name="vendor_qcom_proprietary_display-devicetree" path="kernel_platform/vendor/qcom/proprietary/display-devicetree" revision="creek-v-oss" />
 
   <!-- Stock QCOM / Xiaomi vendor module sources. -->
-  <project remote="micode" name="vendor_qcom_opensource_wlan" path="kernel_platform/vendor/qcom/opensource/wlan" revision="creek-v-oss" />
+  <project remote="dr1408" name="vendor_qcom_opensource_wlan" path="kernel_platform/vendor/qcom/opensource/wlan" revision="creek-injection" />
   <project remote="micode" name="vendor_qcom_opensource_audio-kernel" path="kernel_platform/vendor/qcom/opensource/audio-kernel" revision="creek-v-oss" />
   <project remote="micode" name="vendor_qcom_opensource_camera-kernel" path="kernel_platform/vendor/qcom/opensource/camera-kernel" revision="creek-v-oss" />
   <project remote="micode" name="vendor_opensource_display-drivers" path="kernel_platform/vendor/qcom/opensource/display-drivers" revision="creek-v-oss" />
