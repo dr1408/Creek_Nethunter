@@ -20,6 +20,7 @@ CAMERA := $(KP)/vendor/qcom/opensource/camera-kernel
 AUDIO := $(KP)/vendor/qcom/opensource/audio-kernel
 NETHUNTER_DIR := $(KP)/nethunter-external
 RTW88 := $(NETHUNTER_DIR)/rtw88
+RTW88_REVISION := a56bcd26e770257612a0803249cbd4095fc6feca
 RTL8XXXU := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../rtl)
 
 WLAN_PLATFORM_SYMVERS := $(WLAN_PLATFORM)/Module.symvers
@@ -89,11 +90,15 @@ audio:
 	$(call build_module,audio,$(AUDIO),../vendor/qcom/opensource/audio-kernel,MODNAME=audio_dlkm BOARD_PLATFORM=bengal TARGET_SUPPORT=bengal AUDIO_ROOT=$(AUDIO) CONFIG_SND_SOC_BENGAL=m,vendor/qcom/opensource/audio-kernel)
 
 rtw88:
-	@if [ ! -d "$(RTW88)" ]; then \
-		echo "[creek] cloning rtw88"; \
-		mkdir -p "$(NETHUNTER_DIR)"; \
-		git clone --depth=1 https://github.com/lwfinger/rtw88.git "$(RTW88)"; \
-	fi
+	@set -e; \
+		if [ ! -d "$(RTW88)/.git" ]; then \
+			mkdir -p "$(NETHUNTER_DIR)"; \
+			git init "$(RTW88)"; \
+		fi; \
+		git -C "$(RTW88)" fetch --depth=1 https://github.com/lwfinger/rtw88.git "$(RTW88_REVISION)"; \
+		git -C "$(RTW88)" checkout --detach "$(RTW88_REVISION)"; \
+		test "$$(git -C "$(RTW88)" rev-parse HEAD)" = "$(RTW88_REVISION)"; \
+		echo "[creek] rtw88 pinned to $(RTW88_REVISION)"
 	@echo "[creek] building NetHunter rtw88"
 	cd $(RTW88) && $(MAKE) KSRC=$(VENDOR_KERNEL_SRC) KERNEL_SRC=$(VENDOR_KERNEL_SRC) ARCH=arm64 LLVM=1 O=$(O) KBUILD_MIXED_TREE=$(KBUILD_MIXED_TREE) all
 	@set -e; \
