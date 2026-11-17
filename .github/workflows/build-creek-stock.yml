@@ -35,6 +35,7 @@ jobs:
       EXT_MODULES_MAKEFILE: ${{ github.workspace }}/scripts/creek-external-modules.mk
       CREEK_DIST_DIR: ${{ github.workspace }}/out/dist
       CREEK_INJECTION_DEBUG: "1"
+      CREEK_WLAN_BASELINE_DIR: ${{ github.workspace }}/wlan-baseline
       # Stock first-stage module lists; all other built modules go to vendor_dlkm.
       MODULES_LIST: ${{ github.workspace }}/stock-modules/vendor_boot.modules.load
       MODULES_RECOVERY_LIST: ${{ github.workspace }}/stock-modules/vendor_boot.modules.load.recovery
@@ -252,3 +253,22 @@ jobs:
           name: creek-stock-build
           path: artifacts/
           if-no-files-found: warn
+
+      - name: Retry baseline snapshot outside hermetic build environment
+        if: ${{ always() && hashFiles('wlan-baseline/build-env.sh') != '' && hashFiles('wlan-baseline/metadata.json') == '' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          python3 scripts/creek-wlan-baseline.py save \
+            --work "$WORK" --out "$OUT_DIR" --builder "$GITHUB_WORKSPACE" \
+            --baseline "$CREEK_WLAN_BASELINE_DIR"
+
+      - name: Upload prepared WLAN baseline (also after driver failure)
+        if: ${{ always() && hashFiles('wlan-baseline/metadata.json') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: creek-wlan-baseline
+          path: wlan-baseline/
+          compression-level: 1
+          retention-days: 14
+          if-no-files-found: error

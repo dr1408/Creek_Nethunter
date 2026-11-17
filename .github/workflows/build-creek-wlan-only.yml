@@ -1,0 +1,145 @@
+name: Build Creek WLAN Only
+
+permissions:
+  contents: read
+  actions: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      baseline_run_id:
+        description: "Full-build run ID containing creek-wlan-baseline (failed WLAN builds are OK)"
+        required: true
+        type: string
+      rebuild_cfg80211:
+        description: "Recompile cfg80211 too (normally unnecessary for QCACLD edits)"
+        required: true
+        default: false
+        type: boolean
+      jobs:
+        description: "Parallel jobs: auto or a positive integer"
+        required: true
+        default: "auto"
+        type: string
+
+jobs:
+  wlan:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    env:
+      WORK: ${{ github.workspace }}/work
+      KP: ${{ github.workspace }}/work/kernel_platform
+      OUT_DIR: ${{ github.workspace }}/out
+      BASELINE: ${{ github.workspace }}/wlan-baseline
+      CREEK_INJECTION_DEBUG: "1"
+      REBUILD_CFG80211: ${{ inputs.rebuild_cfg80211 }}
+      BUILD_JOBS: ${{ inputs.jobs }}
+    steps:
+      - name: Checkout builder repo
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache || true
+          df -h
+
+      - name: Install packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            git-core gnupg flex bison build-essential zip curl zlib1g-dev libc6-dev \
+            libncurses-dev libssl-dev libelf-dev python3 python-is-python3 bc rsync \
+            unzip cpio lz4 xz-utils file dwarves pahole jq ca-certificates \
+            binutils lld clang
+          # BBG's host flask-header generator invokes the unversioned linker.
+          sudo ln -sf "$(command -v ld.lld || command -v ld.bfd)" /usr/local/bin/ld
+
+      - name: Setup SWAP like Spring builder
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 16
+
+      - name: Install repo tool
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/bin"
+          curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o "$HOME/bin/repo"
+          chmod +x "$HOME/bin/repo"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Repo sync Creek sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$WORK"
+          cd "$WORK"
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          git config --global color.ui false
+          repo init \
+            -u "https://github.com/${GITHUB_REPOSITORY}.git" \
+            -b "${GITHUB_REF_NAME}" \
+            -m kernel_manifest/creek.xml \
+            --repo-rev=stable \
+            --depth=1 \
+            --no-clone-bundle \
+            --no-tags
+          repo sync -c --no-clone-bundle --no-tags --optimized-fetch --fail-fast -j2
+          echo "Synced projects:"
+          repo list | sort
+
+      - name: Prepare Creek stock layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${GITHUB_WORKSPACE}/scripts/prepare-creek-stock.sh" "$KP"
+          "${GITHUB_WORKSPACE}/scripts/enable-creek-nethunter.sh" "$KP"
+          "${GITHUB_WORKSPACE}/scripts/enable-creek-external-build.sh" "$KP"
+          # Preserve the stock vendor_boot command line while build.sh replaces
+          # only its module payload and keeps the stock ramdisk contents.
+          printf 'KERNEL_VENDOR_CMDLINE=%s\n' "$(cat "$GITHUB_WORKSPACE/stock-modules/vendor_boot.cmdline")" >> "$GITHUB_ENV"
+          echo "Common build constants:"
+          cat "$KP/common/build.config.constants" 2>/dev/null || true
+          echo "MSM build constants:"
+          cat "$KP/msm-kernel/build.config.constants" 2>/dev/null || true
+          echo "Expected clang:"
+          ls -d "$KP/prebuilts/clang/host/linux-x86"/clang-r*/bin/clang
+          "$KP/prebuilts/clang/host/linux-x86/clang-r450784e/bin/clang" --version | head -n1
+
+      - name: Download prepared kernel baseline
+        uses: actions/download-artifact@v4
+        with:
+          name: creek-wlan-baseline
+          path: wlan-baseline
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.baseline_run_id }}
+
+      - name: Restore and verify prepared kernel outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUT_DIR"
+          tar -xf "$BASELINE/prepared-out.tar" -C "$OUT_DIR"
+          python3 scripts/creek-wlan-baseline.py verify \
+            --work "$WORK" --out "$OUT_DIR" --builder "$GITHUB_WORKSPACE" \
+            --baseline "$BASELINE" --allow-pre-reset-baseline
+
+      - name: Build WLAN modules only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/logs
+          scripts/build-creek-wlan-only.sh 2>&1 | tee artifacts/logs/wlan-only.log
+
+      - name: Upload WLAN modules and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: creek-wlan-only
+          path: artifacts/
+          if-no-files-found: warn
