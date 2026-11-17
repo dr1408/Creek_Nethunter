@@ -50,6 +50,18 @@ WLAN_QCACLD_KCFLAGS := KCFLAGS=-Wno-macro-redefined\ -DCFG80211_SINGLE_NETDEV_MU
 .NOTPARALLEL: all wlan-platform wlan-qcacld display camera audio rtw88 rtl8xxxu external-dt
 all: wlan-platform wlan-qcacld display camera audio rtw88 rtl8xxxu external-dt
 
+# Opt-in snapshot, before any external WLAN compilation. The workflow uploads
+# it even if the subsequent driver compilation fails.
+.PHONY: wlan-baseline
+wlan-platform: wlan-baseline
+wlan-baseline:
+	@if [ -n "$(CREEK_WLAN_BASELINE_DIR)" ]; then \
+		python3 "$(abspath $(dir $(lastword $(MAKEFILE_LIST))))/creek-wlan-baseline.py" save \
+			--work "$(abspath $(KP)/..)" --out "$(abspath $(O)/..)" \
+			--builder "$(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)" \
+			--baseline "$(CREEK_WLAN_BASELINE_DIR)"; \
+	fi
+
 wlan-qcacld: wlan-platform
 
 define build_module
