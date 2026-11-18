@@ -95,7 +95,14 @@ def main():
         marker = directory / 'requires-cfg80211-rebuild'
         marker.unlink(missing_ok=True)
         legacy = False
-        if metadata != expected:
+        # The restored channel patch can make the prepared tree identical
+        # to the known old baseline, despite the builder commit changing.
+        exact_legacy = (
+            args.allow_pre_reset_baseline and
+            expected.get('builder') == LEGACY_BUILDER and
+            dict(metadata, builder=LEGACY_BUILDER) == expected
+        )
+        if metadata != expected and not exact_legacy:
             patch = args.builder / 'scripts/baseline-compat/legacy-cfg80211-channel.patch'
             legacy = args.allow_pre_reset_baseline and legacy_channel_compatible(
                 metadata, expected, args.work, patch)

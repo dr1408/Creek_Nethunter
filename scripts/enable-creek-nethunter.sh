@@ -74,6 +74,12 @@ for patch in \
   apply_patch_file "$COMMON" "$patch"
 done
 
+# Match Karui's channel gate removal; cfg80211 is built from msm-kernel.
+# Firmware/driver admission remains responsible for valid monitor requests.
+MONITOR_CHANNEL_PATCH="$REPO_ROOT/patches/msm/cfg80211-monitor-vif-channel.patch"
+test -f "$MONITOR_CHANNEL_PATCH"
+apply_patch_file "$MSM" "$MONITOR_CHANNEL_PATCH"
+
 # Baseband Guard (BBG): source is injected into common/security as an LSM.
 echo "[nethunter] setting up Baseband Guard"
 (
