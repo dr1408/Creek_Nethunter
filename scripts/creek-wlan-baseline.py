@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 
 ENV_KEYS = (
@@ -21,7 +22,17 @@ def git(root, *args):
     return subprocess.check_output(['git', '-C', str(root), *args], text=True).strip()
 
 def inventory(work, builder):
-    paths = subprocess.check_output(['repo', 'list', '-p'], cwd=work, text=True).splitlines()
+    # build.sh can replace PATH with its hermetic toolchain, hiding the repo
+    # launcher installed by the workflow. Prefer an explicit override, then
+    # PATH, then the standard GitHub runner install location.
+    repo_bin = os.environ.get('REPO_BIN') or shutil.which('repo')
+    if not repo_bin:
+        runner_repo = Path.home() / 'bin' / 'repo'
+        if runner_repo.is_file() and os.access(runner_repo, os.X_OK):
+            repo_bin = str(runner_repo)
+    if not repo_bin:
+        raise SystemExit('repo launcher not found (set REPO_BIN or install repo in ~/bin)')
+    paths = subprocess.check_output([repo_bin, 'list', '-p'], cwd=work, text=True).splitlines()
     result = {}
     for rel in paths:
         # All WLAN sources may change: platform modules are rebuilt too.
