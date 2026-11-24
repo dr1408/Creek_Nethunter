@@ -74,6 +74,12 @@ for patch in \
   apply_patch_file "$COMMON" "$patch"
 done
 
+# Let the driver arbitrate monitor-channel requests when other VIFs exist.
+# cfg80211 is built from msm-kernel in Creek's mixed module layout.
+MONITOR_CHANNEL_PATCH="$REPO_ROOT/patches/msm/cfg80211-monitor-vif-channel.patch"
+test -f "$MONITOR_CHANNEL_PATCH"
+apply_patch_file "$MSM" "$MONITOR_CHANNEL_PATCH"
+
 # Baseband Guard (BBG): source is injected into common/security as an LSM.
 echo "[nethunter] setting up Baseband Guard"
 (
