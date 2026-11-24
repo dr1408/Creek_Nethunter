@@ -13,9 +13,10 @@ Copy the numeric run ID from its URL, for example the number following
 
 ## Subsequent driver builds
 
-Run **Build Creek WLAN Only** on the same builder commit:
+Run **Build Creek WLAN Only** from the prepared baseline environment:
 
 - **baseline_run_id:** the full-build run containing that artifact.
+- **wlan_ref:** `concurrent-creek-injection` by default; choose the WLAN branch/commit to compile.
 - **rebuild_cfg80211:** leave false for normal QCACLD/OL/WMA changes.
 - **jobs:** auto, or a positive integer.
 
@@ -34,9 +35,10 @@ not an ABI compatibility bypass, nor an installer/reloader.
 
 ## Compatibility and recovery
 
-The verifier requires identical builder commit, workspace path, non-WLAN
-repository revisions and tracked source patches. The whole WLAN repository is
-allowed to change because the platform dependencies are also rebuilt.
+The verifier requires identical workspace path, non-WLAN repository revisions
+and tracked source patches. The WLAN-only workflow may use a newer builder
+commit solely to select its requested WLAN ref; the entire WLAN repository is
+intentionally excluded because its platform dependencies are rebuilt.
 Kernel/toolchain/build configuration changes require a fresh baseline.
 The script rejects incomplete prepared trees. Module symbol/version checking
 remains enabled.

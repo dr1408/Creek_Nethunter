@@ -11,6 +11,11 @@ on:
         description: "Full-build run ID containing creek-wlan-baseline (failed WLAN builds are OK)"
         required: true
         type: string
+      wlan_ref:
+        description: "WLAN repository branch or commit to compile"
+        required: true
+        default: "concurrent-creek-injection"
+        type: string
       rebuild_cfg80211:
         description: "Recompile cfg80211 too (normally unnecessary for QCACLD edits)"
         required: true
@@ -34,6 +39,7 @@ jobs:
       CREEK_INJECTION_DEBUG: "1"
       REBUILD_CFG80211: ${{ inputs.rebuild_cfg80211 }}
       BUILD_JOBS: ${{ inputs.jobs }}
+      WLAN_REF: ${{ inputs.wlan_ref }}
     steps:
       - name: Checkout builder repo
         uses: actions/checkout@v4
@@ -93,6 +99,16 @@ jobs:
           echo "Synced projects:"
           repo list | sort
 
+      - name: Select WLAN source revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          wlan="$KP/vendor/qcom/opensource/wlan"
+          git -C "$wlan" fetch --depth=1 origin "$WLAN_REF"
+          git -C "$wlan" checkout --detach FETCH_HEAD
+          echo "WLAN ref: $WLAN_REF"
+          git -C "$wlan" log -1 --oneline
+
       - name: Prepare Creek stock layout
         shell: bash
         run: |
@@ -127,7 +143,7 @@ jobs:
           tar -xf "$BASELINE/prepared-out.tar" -C "$OUT_DIR"
           python3 scripts/creek-wlan-baseline.py verify \
             --work "$WORK" --out "$OUT_DIR" --builder "$GITHUB_WORKSPACE" \
-            --baseline "$BASELINE"
+            --baseline "$BASELINE" --allow-builder-change
 
       - name: Build WLAN modules only
         shell: bash

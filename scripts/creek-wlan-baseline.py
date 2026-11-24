@@ -52,13 +52,21 @@ def main():
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--builder', type=Path, required=True)
     parser.add_argument('--baseline', type=Path, required=True)
+    parser.add_argument('--allow-builder-change', action='store_true',
+                        help='allow only the builder revision to differ; non-WLAN source provenance remains strict')
     args = parser.parse_args()
     metadata = inventory(args.work, args.builder)
     directory = args.baseline
     if args.action == 'verify':
         expected = json.loads((directory / 'metadata.json').read_text())
+        if args.allow_builder_change:
+            # A WLAN-only workflow may advance solely to select a different WLAN
+            # revision. WLAN is intentionally excluded from inventory; retain
+            # strict validation of workspace and every non-WLAN source/patch.
+            expected = dict(expected)
+            expected['builder'] = metadata['builder']
         if metadata != expected:
-            raise SystemExit('Baseline mismatch: builder, kernel/toolchain revision, source patches '
+            raise SystemExit('Baseline mismatch: kernel/toolchain revision, source patches '
                              'or workspace changed. Run a new full baseline build.')
         for rel in ('msm-kernel/.config', 'msm-kernel/Module.symvers',
                     'msm-kernel/include/generated/autoconf.h',
