@@ -104,7 +104,9 @@ jobs:
         run: |
           set -euo pipefail
           wlan="$KP/vendor/qcom/opensource/wlan"
-          git -C "$wlan" fetch --depth=1 origin "$WLAN_REF"
+          # repo-managed projects do not consistently name their remote "origin".
+          git -C "$wlan" fetch --depth=1 \
+            "https://github.com/dr1408/vendor_qcom_opensource_wlan.git" "$WLAN_REF"
           git -C "$wlan" checkout --detach FETCH_HEAD
           echo "WLAN ref: $WLAN_REF"
           git -C "$wlan" log -1 --oneline
